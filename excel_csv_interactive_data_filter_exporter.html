@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Excel / CSV 데이터 필터 및 저장 도구</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- SheetJS (xlsx library) -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <style>
+        /* Custom scrollbar for data table */
+        .table-scroll::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        .table-scroll::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+        .table-scroll::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+        .table-scroll::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col font-sans antialiased">
+
+    <!-- Header -->
+    <header class="bg-indigo-600 text-white shadow-md">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <i class="fa-solid me-2 fa-file-excel text-3xl text-emerald-300"></i>
+                <div>
+                    <h1 class="text-xl sm:text-2xl font-bold leading-tight">Excel / CSV 필터 및 추출기</h1>
+                    <p class="text-xs text-indigo-200">파일 업로드, 조건별 필터링 및 재저장 도구</p>
+                </div>
+            </div>
+            <div id="statsBadge" class="hidden bg-indigo-700/80 px-3 py-1.5 rounded-lg border border-indigo-500/30 text-xs sm:text-sm">
+                전체: <span id="totalRowCount" class="font-bold text-indigo-200">0</span>건 | 
+                필터: <span id="filteredRowCount" class="font-bold text-emerald-300">0</span>건
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 flex flex-col gap-6">
+
+        <!-- File Upload Section -->
+        <section id="uploadSection" class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 transition-all duration-200">
+            <div id="dropZone" class="border-2 border-dashed border-indigo-300 hover:border-indigo-500 rounded-xl p-8 sm:p-12 text-center bg-indigo-50/40 hover:bg-indigo-50/80 cursor-pointer transition-colors duration-150 flex flex-col items-center justify-center group">
+                <div class="w-16 h-16 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                    <i class="fa-solid fa-cloud-arrow-up text-2xl"></i>
+                </div>
+                <h2 class="text-lg font-semibold text-slate-700 mb-1">XLSX 또는 CSV 파일을 이곳에 드래그하세요</h2>
+                <p class="text-sm text-slate-500 mb-4">또는 컴퓨터에서 직접 파일 선택</p>
+                <input type="file" id="fileInput" accept=".xlsx, .xls, .csv" class="hidden" />
+                <button onclick="document.getElementById('fileInput').click()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-medium px-5 py-2.5 rounded-lg text-sm shadow-sm transition-colors flex items-center gap-2">
+                    <i class="fa-solid fa-folder-open"></i> 파일 선택하기
+                </button>
+                <p class="text-xs text-slate-400 mt-3">지원 형식: .xlsx, .xls, .csv</p>
+            </div>
+        </section>
+
+        <!-- Active File Controls & Filter Header (Hidden by default) -->
+        <section id="dataControlsSection" class="hidden bg-white rounded-xl shadow-sm border border-slate-200 p-4 sm:p-6 space-y-4">
+            <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+                <!-- File Info -->
+                <div class="flex items-center space-x-3">
+                    <div id="fileTypeIcon" class="w-10 h-10 rounded-lg bg-emerald-100 text-emerald-600 flex items-center justify-center font-bold text-lg">
+                        <i class="fa-solid fa-file-csv"></i>
+                    </div>
+                    <div>
+                        <h3 id="currentFileName" class="font-semibold text-slate-800 break-all">filename.xlsx</h3>
+                        <p id="fileDetails" class="text-xs text-slate-500">시트: <span id="sheetName">Sheet1</span></p>
+                    </div>
+                    <button id="resetFileBtn" title="다른 파일 새로 열기" class="ml-2 text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 px-2.5 py-1.5 rounded-md transition-colors flex items-center gap-1">
+                        <i class="fa-solid fa-rotate-right"></i> 변경
+                    </button>
+                </div>
+
+                <!-- Global Action & Export Buttons -->
+                <div class="flex flex-wrap items-center gap-2">
+                    <button id="clearFiltersBtn" class="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs sm:text-sm font-medium px-3.5 py-2 rounded-lg transition-colors flex items-center gap-1.5">
+                        <i class="fa-solid fa-filter-circle-xmark text-slate-500"></i> 필터 초기화
+                    </button>
+                    <button id="exportCsvBtn" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-medium px-4 py-2 rounded-lg shadow-sm transition-colors flex items-center gap-1.5">
+                        <i class="fa-solid fa-file-csv"></i> CSV 저장
+                    </button>
+                    <button id="exportXlsxBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs sm:text-sm font-medium px-4 py-2 rounded-lg shadow-sm transition-colors flex items-center gap-1.5">
+                        <i class="fa-solid fa-file-excel"></i> XLSX 저장
+                    </button>
+                </div>
+            </div>
+
+            <!-- Sheets selector if multi-sheet file -->
+            <div id="sheetSelectorContainer" class="hidden items-center space-x-2 pt-1">
+                <span class="text-xs font-semibold text-slate-500 uppercase">시트 선택:</span>
+                <select id="sheetSelect" class="text-xs sm:text-sm bg-slate-50 border border-slate-300 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-indigo-500 outline-none">
+                </select>
+            </div>
+        </section>
+
+        <!-- Interactive Data Table View -->
+        <section id="tableSection" class="hidden flex-1 bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col overflow-hidden">
+            <div class="table-scroll overflow-x-auto overflow-y-auto max-h-[65vh] w-full">
+                <table class="w-full text-left border-collapse min-w-max">
+                    <thead class="sticky top-0 bg-slate-100 z-10 shadow-sm">
+                        <!-- Column Header Names -->
+                        <tr id="tableHeaderRow" class="border-b border-slate-200 text-slate-700 font-semibold text-xs sm:text-sm">
+                            <!-- Headers dynamically injected -->
+                        </tr>
+                        <!-- Column Header Filters -->
+                        <tr id="tableFilterRow" class="border-b border-slate-200 bg-slate-50/90 text-xs">
+                            <!-- Filter Inputs dynamically injected -->
+                        </tr>
+                    </thead>
+                    <tbody id="tableBody" class="divide-y divide-slate-200 text-xs sm:text-sm text-slate-600">
+                        <!-- Data Rows dynamically injected -->
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Empty / No Results Message -->
+            <div id="emptyMessage" class="hidden p-12 text-center text-slate-400">
+                <i class="fa-solid fa-magnifying-glass text-3xl mb-2 text-slate-300"></i>
+                <p class="text-sm font-medium">검색 조건에 맞는 데이터가 없습니다.</p>
+                <p class="text-xs mt-1">상단 필터 조건을 변경하거나 '필터 초기화'를 클릭하세요.</p>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Notification Toast -->
+    <div id="toast" class="fixed bottom-5 right-5 bg-slate-800 text-white px-4 py-3 rounded-xl shadow-lg transform translate-y-20 opacity-0 transition-all duration-300 flex items-center space-x-2 text-sm z-50">
+        <i id="toastIcon" class="fa-solid fa-circle-check text-emerald-400"></i>
+        <span id="toastMessage">메시지 내용</span>
+    </div>
+
+    <!-- JavaScript App Logic -->
+    <script>
+        // App State
+        let rawWorkbook = null;
+        let currentSheetData = []; // Full parsed JSON data
+        let filteredData = [];     // Currently filtered JSON data
+        let headers = [];          // Column names
+        let columnFilters = {};    // Active filters: { colName: "filterValue" }
+
+        // DOM Elements
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+        const uploadSection = document.getElementById('uploadSection');
+        const dataControlsSection = document.getElementById('dataControlsSection');
+        const tableSection = document.getElementById('tableSection');
+        const currentFileName = document.getElementById('currentFileName');
+        const fileDetails = document.getElementById('fileDetails');
+        const sheetNameSpan = document.getElementById('sheetName');
+        const sheetSelectorContainer = document.getElementById('sheetSelectorContainer');
+        const sheetSelect = document.getElementById('sheetSelect');
+        const fileTypeIcon = document.getElementById('fileTypeIcon');
+        const statsBadge = document.getElementById('statsBadge');
+        const totalRowCount = document.getElementById('totalRowCount');
+        const filteredRowCount = document.getElementById('filteredRowCount');
+        const tableHeaderRow = document.getElementById('tableHeaderRow');
+        const tableFilterRow = document.getElementById('tableFilterRow');
+        const tableBody = document.getElementById('tableBody');
+        const emptyMessage = document.getElementById('emptyMessage');
+        const resetFileBtn = document.getElementById('resetFileBtn');
+        const clearFiltersBtn = document.getElementById('clearFiltersBtn');
+        const exportCsvBtn = document.getElementById('exportCsvBtn');
+        const exportXlsxBtn = document.getElementById('exportXlsxBtn');
+
+        // Drag and Drop Event Listeners
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                dropZone.classList.add('border-indigo-600', 'bg-indigo-100/50');
+            }, false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                dropZone.classList.remove('border-indigo-600', 'bg-indigo-100/50');
+            }, false);
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            if (files.length > 0) {
+                handleFileSelect(files[0]);
+            }
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFileSelect(e.target.files[0]);
+            }
+        });
+
+        resetFileBtn.addEventListener('click', resetApp);
+        clearFiltersBtn.addEventListener('click', clearAllFilters);
+        exportCsvBtn.addEventListener('click', () => exportData('csv'));
+        exportXlsxBtn.addEventListener('click', () => exportData('xlsx'));
+
+        sheetSelect.addEventListener('change', (e) => {
+            loadSheetData(e.target.value);
+        });
+
+        // Handle File Reading
+        function handleFileSelect(file) {
+            const ext = file.name.split('.').pop().toLowerCase();
+            if (!['xlsx', 'xls', 'csv'].includes(ext)) {
+                showToast('지원되지 않는 파일 형식입니다. (xlsx, csv만 지원)', 'error');
+                return;
+            }
+
+            // Update UI elements
+            currentFileName.textContent = file.name;
+            if (ext === 'csv') {
+                fileTypeIcon.innerHTML = '<i class="fa-solid fa-file-csv"></i>';
+                fileTypeIcon.className = 'w-10 h-10 rounded-lg bg-amber-100 text-amber-600 flex items-center justify-center font-bold text-lg';
+            } else {
+                fileTypeIcon.innerHTML = '<i class="fa-solid fa-file-excel"></i>';
+                fileTypeIcon.className = 'w-10 h-10 rounded-lg bg-emerald-100 text-emerald-600 flex items-center justify-center font-bold text-lg';
+            }
+
+            const reader = new FileReader();
+            reader.onload = function (e) {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    rawWorkbook = XLSX.read(data, { type: 'array' });
+
+                    // Populate Sheet Options
+                    sheetSelect.innerHTML = '';
+                    if (rawWorkbook.SheetNames.length > 1) {
+                        sheetSelectorContainer.classList.remove('hidden');
+                        sheetSelectorContainer.classList.add('flex');
+                        rawWorkbook.SheetNames.forEach(name => {
+                            const opt = document.createElement('option');
+                            opt.value = name;
+                            opt.textContent = name;
+                            sheetSelect.appendChild(opt);
+                        });
+                    } else {
+                        sheetSelectorContainer.classList.add('hidden');
+                        sheetSelectorContainer.classList.remove('flex');
+                    }
+
+                    // Load First Sheet
+                    loadSheetData(rawWorkbook.SheetNames[0]);
+
+                    // Show Content Sections
+                    uploadSection.classList.add('hidden');
+                    dataControlsSection.classList.remove('hidden');
+                    tableSection.classList.remove('hidden');
+                    statsBadge.classList.remove('hidden');
+
+                    showToast('파일을 성공적으로 로드했습니다.');
+                } catch (err) {
+                    console.error(err);
+                    showToast('파일을 읽는 중 오류가 발생했습니다.', 'error');
+                }
+            };
+
+            reader.readAsArrayBuffer(file);
+        }
+
+        // Load specific sheet into memory
+        function loadSheetData(sheetName) {
+            sheetNameSpan.textContent = sheetName;
+            const worksheet = rawWorkbook.Sheets[sheetName];
+
+            // Convert worksheet to JSON (header on top row)
+            const json = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+
+            if (json.length === 0) {
+                showToast('선택한 시트에 데이터가 존재하지 않습니다.', 'error');
+                currentSheetData = [];
+                headers = [];
+                renderTableHeaders();
+                applyFilters();
+                return;
+            }
+
+            // Extract all headers dynamically from first row or keys
+            headers = Object.keys(json[0]);
+            currentSheetData = json;
+            columnFilters = {};
+
+            renderTableHeaders();
+            applyFilters();
+        }
+
+        // Render Table Headers & Filter Inputs
+        function renderTableHeaders() {
+            tableHeaderRow.innerHTML = '';
+            tableFilterRow.innerHTML = '';
+
+            if (headers.length === 0) return;
+
+            headers.forEach((header, index) => {
+                // Header Label
+                const th = document.createElement('th');
+                th.className = 'px-4 py-3 border-r border-slate-200 last:border-r-0 whitespace-nowrap text-slate-700 select-none';
+                th.innerHTML = `
+                    <div class="flex items-center justify-between gap-2">
+                        <span>${escapeHtml(header)}</span>
+                        <i class="fa-solid fa-arrow-down-short-wide text-slate-300 text-xs"></i>
+                    </div>
+                `;
+                tableHeaderRow.appendChild(th);
+
+                // Header Filter Input
+                const thFilter = document.createElement('th');
+                thFilter.className = 'px-2 py-2 border-r border-slate-200 last:border-r-0 font-normal';
+                
+                const filterInput = document.createElement('input');
+                filterInput.type = 'text';
+                filterInput.placeholder = `검색...`;
+                filterInput.className = 'w-full px-2 py-1 text-xs border border-slate-300 rounded focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all';
+                filterInput.value = columnFilters[header] || '';
+
+                filterInput.addEventListener('input', (e) => {
+                    const val = e.target.value;
+                    if (val.trim() === '') {
+                        delete columnFilters[header];
+                    } else {
+                        columnFilters[header] = val;
+                    }
+                    applyFilters();
+                });
+
+                thFilter.appendChild(filterInput);
+                tableFilterRow.appendChild(thFilter);
+            });
+        }
+
+        // Apply filters across all rows
+        function applyFilters() {
+            const filterKeys = Object.keys(columnFilters);
+
+            if (filterKeys.length === 0) {
+                filteredData = [...currentSheetData];
+            } else {
+                filteredData = currentSheetData.filter(row => {
+                    return filterKeys.every(key => {
+                        const cellValue = String(row[key] ?? '').toLowerCase();
+                        const filterVal = String(columnFilters[key]).toLowerCase();
+                        return cellValue.includes(filterVal);
+                    });
+                });
+            }
+
+            updateCounts();
+            renderTableBody();
+        }
+
+        // Render Table Body
+        function renderTableBody() {
+            tableBody.innerHTML = '';
+
+            if (filteredData.length === 0) {
+                emptyMessage.classList.remove('hidden');
+                return;
+            } else {
+                emptyMessage.classList.add('hidden');
+            }
+
+            // Render up to 500 rows for smooth UI performance
+            const displayLimit = Math.min(filteredData.length, 500);
+
+            const fragment = document.createDocumentFragment();
+
+            for (let i = 0; i < displayLimit; i++) {
+                const row = filteredData[i];
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-indigo-50/40 transition-colors border-b border-slate-100';
+
+                headers.forEach(header => {
+                    const td = document.createElement('td');
+                    td.className = 'px-4 py-2.5 border-r border-slate-100 last:border-r-0 whitespace-nowrap max-w-xs truncate';
+                    const value = row[header] !== undefined ? row[header] : '';
+                    td.textContent = value;
+                    td.title = value; // hover tooltip for long text
+                    tr.appendChild(td);
+                });
+
+                fragment.appendChild(tr);
+            }
+
+            tableBody.appendChild(fragment);
+
+            // Show performance limit warning if truncated
+            if (filteredData.length > 500) {
+                const trLimit = document.createElement('tr');
+                trLimit.className = 'bg-slate-100 text-slate-500 font-medium text-center text-xs';
+                trLimit.innerHTML = `<td colspan="${headers.length}" class="py-2.5">
+                    <i class="fa-solid fa-circle-info mr-1 text-indigo-500"></i> 화면에 상위 500개 데이터만 표시 중입니다. (내보내기 시 전체 ${filteredData.length}건 저장)
+                </td>`;
+                tableBody.appendChild(trLimit);
+            }
+        }
+
+        // Update Counter Display
+        function updateCounts() {
+            totalRowCount.textContent = currentSheetData.length.toLocaleString();
+            filteredRowCount.textContent = filteredData.length.toLocaleString();
+        }
+
+        // Clear all active filters
+        function clearAllFilters() {
+            columnFilters = {};
+            const filterInputs = tableFilterRow.querySelectorAll('input');
+            filterInputs.forEach(input => input.value = '');
+            applyFilters();
+            showToast('모든 필터가 초기화되었습니다.');
+        }
+
+        // Export Filtered Data
+        function exportData(type) {
+            if (filteredData.length === 0) {
+                showToast('내보낼 데이터가 없습니다.', 'error');
+                return;
+            }
+
+            const worksheet = XLSX.utils.json_to_sheet(filteredData);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, "Filtered_Data");
+
+            const origName = currentFileName.textContent.substring(0, currentFileName.textContent.lastIndexOf('.')) || 'filtered_data';
+            const fileName = `${origName}_filtered.${type}`;
+
+            if (type === 'csv') {
+                XLSX.writeFile(workbook, fileName, { bookType: 'csv' });
+            } else if (type === 'xlsx') {
+                XLSX.writeFile(workbook, fileName, { bookType: 'xlsx' });
+            }
+
+            showToast(`${fileName} 파일로 저장되었습니다.`);
+        }
+
+        // Reset App to original state
+        function resetApp() {
+            rawWorkbook = null;
+            currentSheetData = [];
+            filteredData = [];
+            headers = [];
+            columnFilters = {};
+            fileInput.value = '';
+
+            uploadSection.classList.remove('hidden');
+            dataControlsSection.classList.add('hidden');
+            tableSection.classList.add('hidden');
+            statsBadge.classList.add('hidden');
+
+            tableHeaderRow.innerHTML = '';
+            tableFilterRow.innerHTML = '';
+            tableBody.innerHTML = '';
+        }
+
+        // Helper: Escape HTML
+        function escapeHtml(str) {
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
+        // Toast Notification System
+        function showToast(message, type = 'success') {
+            const toast = document.getElementById('toast');
+            const toastMessage = document.getElementById('toastMessage');
+            const toastIcon = document.getElementById('toastIcon');
+
+            toastMessage.textContent = message;
+
+            if (type === 'error') {
+                toastIcon.className = 'fa-solid fa-triangle-exclamation text-rose-400';
+            } else {
+                toastIcon.className = 'fa-solid fa-circle-check text-emerald-400';
+            }
+
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            toast.classList.add('translate-y-0', 'opacity-100');
+
+            setTimeout(() => {
+                toast.classList.remove('translate-y-0', 'opacity-100');
+                toast.classList.add('translate-y-20', 'opacity-0');
+            }, 3000);
+        }
+    </script>
+</body>
+</html>
